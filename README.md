@@ -2,11 +2,11 @@
 
 A comprehensive Open Source Intelligence (OSINT) tool for Steam users and games, integrated directly into Google Sheets.
 
-Built with the assistance of Claude-3.7/Cursor.
+Built with @getcursor
 
 ## What is Steam OSINT?
 
-Steam OSINT is a Google Apps Script that provides powerful tools for gathering and analyzing information about Steam users and games. It leverages the Steam Web API to collect data that can be used for research, community management, game analytics, and more.
+Steam OSINT is a Google Apps Script that provides powerful tools for gathering and analyzing information about Steam users and games. It leverages the Steam Web API and Community Ban List (CBL) API to collect data that can be used for research, community management, game analytics, and more.
 
 ## Key Features
 
@@ -16,6 +16,42 @@ Steam OSINT is a Google Apps Script that provides powerful tools for gathering a
 - **Game Library Analysis**: Analyze users' game collections and playtime statistics
 - **Game Information**: Get detailed information about games on Steam
 - **Batch Processing**: Process multiple Steam IDs in a single operation
+- **CBL Integration**: Check Community Ban List status for Steam users
+- **Profile Links**: Automatically generate links to Steam and CBL profiles
+
+## Features
+
+### Game Ownership Verification
+Quickly check if a list of Steam users own a specific game. This is useful for:
+- Verifying if players meet requirements for joining a community
+- Checking if users have access to a game before inviting them to play
+- Analyzing game adoption rates among a group of users
+
+### Playtime Analysis
+Track how much time users have spent playing a specific game:
+- Recent playtime (last 2 weeks)
+- Total playtime (all-time)
+
+### User Profiling
+Get detailed information about Steam users:
+- Profile visibility
+- Account creation date
+- Country
+- Real name (if public)
+- Profile URL
+
+### CBL Integration
+Check Community Ban List (CBL) status for Steam users:
+- View active and expired bans
+- See reputation points and risk rating
+- Check ban reasons and issuing organizations
+- Process multiple users in batch mode
+- Direct links to CBL profiles for further investigation
+
+### Profile Links
+Automatically generate clickable links to:
+- Steam profiles - for quick access to user information
+- CBL profiles - for detailed ban history and reputation information
 
 ## Setup Instructions
 
@@ -72,6 +108,12 @@ The script adds a comprehensive "Steam OSINT" menu with the following options:
 #### User Info
 - **Get User Profile**: Shows basic profile information for a Steam user
 - **Get User Game Count**: Shows how many games a user owns and their total playtime
+- **Check CBL Status**: Shows Community Ban List status for a single Steam user
+
+#### CBL Integration
+- **Check CBL Status (Batch)**: Checks CBL status for all Steam IDs in the current sheet
+- **Resume CBL Status Check**: Continues checking CBL status from where you left off
+- **Reset CBL Progress Tracker**: Clears saved CBL progress to start fresh
 
 #### Utilities
 - **Convert SteamID Format**: Provides information about SteamID conversion
@@ -126,10 +168,38 @@ The script includes features to handle interruptions and allow you to resume che
 - Progress is saved after each row
 - If an error occurs, you'll only lose the current row being processed
 
+## CBL Integration Details
+
+The Community Ban List (CBL) integration allows you to check if Steam users have active bans on participating game servers and communities. This is particularly useful for:
+
+- Server administrators who want to screen potential players
+- Community managers who need to vet new members
+- Tournament organizers who need to verify player eligibility
+
+### CBL Data Provided
+When checking CBL status, the script provides:
+
+1. **Has CBL Bans**: A simple Yes/No indicator if the user has active bans
+2. **Active Bans Count**: The number of current active bans
+3. **Expired Bans Count**: The number of past bans that have expired
+4. **Reputation Points**: A numerical score representing the user's reputation
+5. **Risk Rating**: A rating indicating the potential risk of the user
+6. **Steam Profile Link**: Direct link to the user's Steam profile
+7. **CBL Profile Link**: Direct link to the user's CBL profile for detailed information
+
+### Using CBL Integration
+To use the CBL integration:
+
+1. Select "CBL Integration" > "Check CBL Status (Batch)" from the Steam OSINT menu
+2. The script will process all Steam IDs in your sheet and add CBL data in new columns
+3. If the process is interrupted, you can resume it using "Resume CBL Status Check"
+
+For checking individual users, use "User Info" > "Check CBL Status" which will display detailed ban information including reasons and issuing organizations.
+
 ## Important Notes
 
 - **Privacy Settings**: The script can only retrieve data for users with public profiles. If a user has their profile set to private, the script will have limited access to their information.
-- **Rate Limits**: The Steam Web API has rate limits. The script includes a small delay between requests to avoid hitting these limits.
+- **Rate Limits**: The Steam Web API and CBL API have rate limits. The script includes small delays between requests to avoid hitting these limits.
 - **Authorization**: When you first run the script, Google will ask you to authorize it. This is normal and required for the script to access your sheet.
 - **Execution Time Limits**: Google Apps Script has a maximum execution time of 6 minutes. The script handles this by allowing you to pause and resume.
 - **Playtime Format**: Playtime is displayed in hours with one decimal place (e.g., 1.5 hours instead of 90 minutes).
