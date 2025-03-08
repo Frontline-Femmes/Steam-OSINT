@@ -7,8 +7,9 @@
  */
 
 // Configuration - Update these values
-const STEAM_API_KEY = ''; // Add your Steam Web API key
+const STEAM_API_KEY = ''; // Replace with your Steam Web API key
 const APP_ID = ''; // Replace with the Steam AppID of the game you want to check
+const CBL_API_ENDPOINT = 'https://communitybanlist.com/graphql'; // Community Ban List GraphQL endpoint
 
 // Script properties to store progress
 const PROPERTY_LAST_PROCESSED_ROW = 'lastProcessedRow';
@@ -32,7 +33,13 @@ function onOpen() {
     // User Info submenu
     .addSubMenu(ui.createMenu('User Info')
       .addItem('Get User Profile', 'getUserProfile')
-      .addItem('Get User Game Count', 'getUserGameCount'))
+      .addItem('Get User Game Count', 'getUserGameCount')
+      .addItem('Check CBL Status', 'checkCBLStatus'))
+    // CBL Integration submenu
+    .addSubMenu(ui.createMenu('CBL Integration')
+      .addItem('Check CBL Status (Batch)', 'checkCBLStatusBatch')
+      .addItem('Resume CBL Status Check', 'resumeCBLStatusCheck')
+      .addItem('Reset CBL Progress Tracker', 'resetCBLProgressTracker'))
     // Utilities submenu
     .addSubMenu(ui.createMenu('Utilities')
       .addItem('Convert SteamID Format', 'convertSteamIDFormat')
@@ -119,6 +126,7 @@ function processGameOwnership(startRow) {
   let resultColIndex = -1;
   let recentPlaytimeColIndex = -1;
   let totalPlaytimeColIndex = -1;
+  let steamProfileLinkColIndex = -1;
   
   // Check the header row to find our columns
   for (let i = 0; i < values[0].length; i++) {
@@ -134,6 +142,9 @@ function processGameOwnership(startRow) {
     }
     if (header.includes('total playtime') || header.includes('playtime_forever')) {
       totalPlaytimeColIndex = i;
+    }
+    if (header.includes('steam profile') || header.includes('profile link')) {
+      steamProfileLinkColIndex = i;
     }
   }
   
@@ -173,6 +184,17 @@ function processGameOwnership(startRow) {
     sheet.getRange(1, totalPlaytimeColIndex + 1).setValue('Total Playtime (hours)');
   }
   
+  // If we didn't find a Steam profile link column, create one
+  if (steamProfileLinkColIndex === -1) {
+    steamProfileLinkColIndex = values[0].length + 
+      (resultColIndex === values[0].length ? 1 : 0) + 
+      (recentPlaytimeColIndex === values[0].length + (resultColIndex === values[0].length ? 1 : 0) ? 1 : 0) +
+      (totalPlaytimeColIndex === values[0].length + 
+        (resultColIndex === values[0].length ? 1 : 0) + 
+        (recentPlaytimeColIndex === values[0].length + (resultColIndex === values[0].length ? 1 : 0) ? 1 : 0) ? 1 : 0);
+    sheet.getRange(1, steamProfileLinkColIndex + 1).setValue('Steam Profile Link');
+  }
+  
   // Create a progress indicator
   const totalRows = values.length - 1; // Exclude header
   const remainingRows = totalRows - startRow + 1;
@@ -204,6 +226,10 @@ function processGameOwnership(startRow) {
       // Update the result cells immediately after checking each user
       sheet.getRange(row + 1, resultColIndex + 1).setValue(gameData.ownsGame ? 'Yes' : 'No');
       
+      // Add Steam profile link
+      const steamProfileUrl = `https://steamcommunity.com/profiles/${steamId}`;
+      sheet.getRange(row + 1, steamProfileLinkColIndex + 1).setValue(steamProfileUrl);
+      
       // Update playtime cells
       if (gameData.ownsGame) {
         // Convert minutes to hours with 1 decimal place
@@ -227,6 +253,10 @@ function processGameOwnership(startRow) {
       sheet.getRange(row + 1, resultColIndex + 1).setValue('Error: ' + error.message);
       sheet.getRange(row + 1, recentPlaytimeColIndex + 1).setValue('');
       sheet.getRange(row + 1, totalPlaytimeColIndex + 1).setValue('');
+      
+      // Still add Steam profile link even if there's an error
+      const steamProfileUrl = `https://steamcommunity.com/profiles/${steamId}`;
+      sheet.getRange(row + 1, steamProfileLinkColIndex + 1).setValue(steamProfileUrl);
       
       // Still update the progress tracker even for error rows
       properties.setProperty(PROPERTY_LAST_PROCESSED_ROW, row.toString());
@@ -628,7 +658,7 @@ function showAboutDialog() {
   const ui = SpreadsheetApp.getUi();
   const message = 
     'Steam OSINT\n' +
-    'Version 2.0.0\n\n' +
+    'Version 2.1.0\n\n' +
     'This script provides Open Source Intelligence (OSINT) tools for Steam users and games.\n\n' +
     'Features:\n' +
     '- Check game ownership for multiple Steam IDs\n' +
@@ -637,9 +667,457 @@ function showAboutDialog() {
     '- Analyze game libraries and playtime statistics\n' +
     '- Get detailed game information\n' +
     '- Find game AppIDs\n' +
+    '- Check Community Ban List (CBL) status\n' +
     '- Resume interrupted operations\n\n' +
     'For help or to report issues, please refer to the README documentation.\n\n' +
-    'This script uses the Steam Web API and requires a valid API key.';
+    'This script uses the Steam Web API and requires a valid API key.\n' +
+    'CBL integration uses the Community Ban List GraphQL API.';
   
   ui.alert('About Steam OSINT', message, ui.ButtonSet.OK);
+}
+
+/**
+ * Checks the CBL API for a given Steam ID
+ */
+function checkCBLStatus() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    'Check CBL Status',
+    'Enter the SteamID64 of the user:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() === ui.Button.OK) {
+    const steamId = response.getResponseText().trim();
+    
+    if (!steamId || steamId.length < 17) {
+      ui.alert('Error', 'Please enter a valid SteamID64 (17-digit number).', ui.ButtonSet.OK);
+      return;
+    }
+    
+    try {
+      // GraphQL query for CBL API
+      const query = `
+        query GetSteamUser {
+          steamUser(id: "${steamId}") {
+            id
+            name
+            avatarFull
+            reputationPoints
+            riskRating
+            reputationRank
+            activeBans: bans(orderBy: "created", orderDirection: DESC, expired: false) {
+              edges {
+                node {
+                  id
+                  created
+                  expires
+                  reason
+                  banList {
+                    name
+                    organisation {
+                      name
+                      discord
+                    }
+                  }
+                }
+              }
+            }
+            expiredBans: bans(orderBy: "created", orderDirection: DESC, expired: true) {
+              edges {
+                node {
+                  id
+                  created
+                  expires
+                  reason
+                  banList {
+                    name
+                    organisation {
+                      name
+                      discord
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+      
+      // Make the GraphQL request
+      const options = {
+        'method': 'post',
+        'contentType': 'application/json',
+        'payload': JSON.stringify({ query: query })
+      };
+      
+      const response = UrlFetchApp.fetch(CBL_API_ENDPOINT, options);
+      const data = JSON.parse(response.getContentText());
+      
+      if (data.data && data.data.steamUser) {
+        const user = data.data.steamUser;
+        
+        // Create a message with CBL status
+        let message = `Steam User: ${user.name}\n\n`;
+        message += `Reputation Points: ${user.reputationPoints}\n`;
+        message += `Risk Rating: ${user.riskRating}\n`;
+        message += `Reputation Rank: ${user.reputationRank}\n\n`;
+        
+        // Active bans
+        message += `Active Bans: ${user.activeBans.edges.length}\n`;
+        if (user.activeBans.edges.length > 0) {
+          message += '-------------------\n';
+          user.activeBans.edges.forEach((edge, index) => {
+            const ban = edge.node;
+            const created = new Date(ban.created).toLocaleDateString();
+            const expires = ban.expires ? new Date(ban.expires).toLocaleDateString() : 'Permanent';
+            
+            message += `Ban #${index + 1}:\n`;
+            message += `Reason: ${ban.reason}\n`;
+            message += `Created: ${created}\n`;
+            message += `Expires: ${expires}\n`;
+            message += `Ban List: ${ban.banList.name} (${ban.banList.organisation.name})\n\n`;
+          });
+        }
+        
+        // Expired bans
+        message += `Expired Bans: ${user.expiredBans.edges.length}\n`;
+        if (user.expiredBans.edges.length > 0) {
+          message += '-------------------\n';
+          user.expiredBans.edges.forEach((edge, index) => {
+            const ban = edge.node;
+            const created = new Date(ban.created).toLocaleDateString();
+            const expires = new Date(ban.expires).toLocaleDateString();
+            
+            message += `Ban #${index + 1}:\n`;
+            message += `Reason: ${ban.reason}\n`;
+            message += `Created: ${created}\n`;
+            message += `Expired: ${expires}\n`;
+            message += `Ban List: ${ban.banList.name} (${ban.banList.organisation.name})\n\n`;
+          });
+        }
+        
+        // Show the results
+        ui.alert('CBL Status', message, ui.ButtonSet.OK);
+      } else {
+        ui.alert('CBL Status', 'No ban records found for this Steam ID.', ui.ButtonSet.OK);
+      }
+    } catch (error) {
+      ui.alert('Error', `Failed to get CBL status: ${error.message}`, ui.ButtonSet.OK);
+    }
+  }
+}
+
+/**
+ * Batch checks CBL status for multiple Steam IDs in the active sheet
+ */
+function checkCBLStatusBatch() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Check CBL Status (Batch)',
+    'This will check CBL status for all Steam IDs in the current sheet. Continue?',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response === ui.Button.OK) {
+    // Reset progress tracker
+    const properties = PropertiesService.getScriptProperties();
+    properties.deleteProperty('lastCBLProcessedRow');
+    properties.deleteProperty('currentCBLSheetId');
+    
+    // Start processing from row 2 (after header)
+    processCBLStatus(2);
+  }
+}
+
+/**
+ * Resumes an interrupted CBL status check
+ */
+function resumeCBLStatusCheck() {
+  const properties = PropertiesService.getScriptProperties();
+  const lastProcessedRow = properties.getProperty('lastCBLProcessedRow');
+  const currentSheetId = properties.getProperty('currentCBLSheetId');
+  
+  if (!lastProcessedRow || !currentSheetId) {
+    SpreadsheetApp.getUi().alert('No interrupted CBL status check found to resume.');
+    return;
+  }
+  
+  // Find the sheet with the matching ID
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = spreadsheet.getSheets();
+  let targetSheet = null;
+  
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].getSheetId().toString() === currentSheetId) {
+      targetSheet = sheets[i];
+      break;
+    }
+  }
+  
+  if (!targetSheet) {
+    SpreadsheetApp.getUi().alert('Could not find the sheet where the previous check was running.');
+    return;
+  }
+  
+  // Activate the sheet and resume processing
+  targetSheet.activate();
+  const nextRow = parseInt(lastProcessedRow) + 1;
+  processCBLStatus(nextRow);
+}
+
+/**
+ * Resets the CBL progress tracker
+ */
+function resetCBLProgressTracker() {
+  const properties = PropertiesService.getScriptProperties();
+  properties.deleteProperty('lastCBLProcessedRow');
+  properties.deleteProperty('currentCBLSheetId');
+  SpreadsheetApp.getUi().alert('CBL progress tracker has been reset.');
+}
+
+/**
+ * Process CBL status starting from a specific row
+ * 
+ * @param {number} startRow - The row to start processing from (1-indexed, after header)
+ */
+function processCBLStatus(startRow) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+  
+  // Save the current sheet ID for resuming later
+  const properties = PropertiesService.getScriptProperties();
+  properties.setProperty('currentCBLSheetId', sheet.getSheetId().toString());
+  
+  // Find the columns for Steam ID and results
+  let steamIdColIndex = -1;
+  let hasBansColIndex = -1;
+  let activeBansColIndex = -1;
+  let expiredBansColIndex = -1;
+  let reputationColIndex = -1;
+  let riskRatingColIndex = -1;
+  let steamProfileLinkColIndex = -1;
+  let cblProfileLinkColIndex = -1;
+  
+  // Check the header row to find our columns
+  for (let i = 0; i < values[0].length; i++) {
+    const header = values[0][i].toString().toLowerCase();
+    if (header.includes('steam') && (header.includes('id') || header.includes('64'))) {
+      steamIdColIndex = i;
+    }
+    if (header.includes('has bans') || header.includes('cbl banned')) {
+      hasBansColIndex = i;
+    }
+    if (header.includes('active bans')) {
+      activeBansColIndex = i;
+    }
+    if (header.includes('expired bans')) {
+      expiredBansColIndex = i;
+    }
+    if (header.includes('reputation') || header.includes('rep points')) {
+      reputationColIndex = i;
+    }
+    if (header.includes('risk rating')) {
+      riskRatingColIndex = i;
+    }
+    if (header.includes('steam profile') || header.includes('steam link')) {
+      steamProfileLinkColIndex = i;
+    }
+    if (header.includes('cbl profile') || header.includes('cbl link')) {
+      cblProfileLinkColIndex = i;
+    }
+  }
+  
+  // If we didn't find a Steam ID column, ask the user which column to use
+  if (steamIdColIndex === -1) {
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.prompt(
+      'Steam ID Column',
+      'Enter the column letter that contains Steam IDs:',
+      ui.ButtonSet.OK_CANCEL
+    );
+    
+    if (response.getSelectedButton() === ui.Button.OK) {
+      const colLetter = response.getResponseText().toUpperCase();
+      steamIdColIndex = columnLetterToIndex(colLetter);
+    } else {
+      return; // User cancelled
+    }
+  }
+  
+  // If we didn't find result columns, create them
+  if (hasBansColIndex === -1) {
+    hasBansColIndex = values[0].length;
+    sheet.getRange(1, hasBansColIndex + 1).setValue('Has CBL Bans');
+  }
+  
+  if (activeBansColIndex === -1) {
+    activeBansColIndex = hasBansColIndex === values[0].length ? values[0].length + 1 : values[0].length;
+    sheet.getRange(1, activeBansColIndex + 1).setValue('Active Bans Count');
+  }
+  
+  if (expiredBansColIndex === -1) {
+    expiredBansColIndex = Math.max(values[0].length, hasBansColIndex + 1, activeBansColIndex + 1);
+    sheet.getRange(1, expiredBansColIndex + 1).setValue('Expired Bans Count');
+  }
+  
+  if (reputationColIndex === -1) {
+    reputationColIndex = Math.max(values[0].length, hasBansColIndex + 1, activeBansColIndex + 1, expiredBansColIndex + 1);
+    sheet.getRange(1, reputationColIndex + 1).setValue('Reputation Points');
+  }
+  
+  if (riskRatingColIndex === -1) {
+    riskRatingColIndex = Math.max(values[0].length, hasBansColIndex + 1, activeBansColIndex + 1, expiredBansColIndex + 1, reputationColIndex + 1);
+    sheet.getRange(1, riskRatingColIndex + 1).setValue('Risk Rating');
+  }
+  
+  if (steamProfileLinkColIndex === -1) {
+    steamProfileLinkColIndex = Math.max(values[0].length, hasBansColIndex + 1, activeBansColIndex + 1, expiredBansColIndex + 1, reputationColIndex + 1, riskRatingColIndex + 1);
+    sheet.getRange(1, steamProfileLinkColIndex + 1).setValue('Steam Profile Link');
+  }
+  
+  if (cblProfileLinkColIndex === -1) {
+    cblProfileLinkColIndex = Math.max(values[0].length, hasBansColIndex + 1, activeBansColIndex + 1, expiredBansColIndex + 1, reputationColIndex + 1, riskRatingColIndex + 1, steamProfileLinkColIndex + 1);
+    sheet.getRange(1, cblProfileLinkColIndex + 1).setValue('CBL Profile Link');
+  }
+  
+  // Create a progress indicator
+  const totalRows = values.length - 1; // Exclude header
+  const remainingRows = totalRows - startRow + 1;
+  
+  if (remainingRows <= 0) {
+    SpreadsheetApp.getUi().alert('No rows to process. Check completed!');
+    return;
+  }
+  
+  // Show a progress dialog
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(`Processing ${remainingRows} rows. This may take some time. Click OK to begin.`);
+  
+  // Process each row starting from startRow
+  for (let row = startRow; row < values.length; row++) {
+    const steamId = values[row][steamIdColIndex].toString().trim();
+    
+    // Skip empty cells
+    if (!steamId) {
+      // Update progress tracker even for skipped rows
+      properties.setProperty('lastCBLProcessedRow', row.toString());
+      continue;
+    }
+    
+    try {
+      // Add Steam profile link
+      const steamProfileUrl = `https://steamcommunity.com/profiles/${steamId}`;
+      sheet.getRange(row + 1, steamProfileLinkColIndex + 1).setValue(steamProfileUrl);
+      
+      // Add CBL profile link
+      const cblProfileUrl = `https://communitybanlist.com/search/${steamId}`;
+      sheet.getRange(row + 1, cblProfileLinkColIndex + 1).setValue(cblProfileUrl);
+      
+      // GraphQL query for CBL API
+      const query = `
+        query GetSteamUser {
+          steamUser(id: "${steamId}") {
+            id
+            name
+            reputationPoints
+            riskRating
+            activeBans: bans(orderBy: "created", orderDirection: DESC, expired: false) {
+              edges {
+                node {
+                  id
+                }
+              }
+            }
+            expiredBans: bans(orderBy: "created", orderDirection: DESC, expired: true) {
+              edges {
+                node {
+                  id
+                }
+              }
+            }
+          }
+        }
+      `;
+      
+      // Make the GraphQL request
+      const options = {
+        'method': 'post',
+        'contentType': 'application/json',
+        'payload': JSON.stringify({ query: query })
+      };
+      
+      const response = UrlFetchApp.fetch(CBL_API_ENDPOINT, options);
+      const data = JSON.parse(response.getContentText());
+      
+      if (data.data && data.data.steamUser) {
+        const user = data.data.steamUser;
+        const activeBansCount = user.activeBans.edges.length;
+        const expiredBansCount = user.expiredBans.edges.length;
+        const hasBans = activeBansCount > 0;
+        
+        // Update the sheet with the results
+        sheet.getRange(row + 1, hasBansColIndex + 1).setValue(hasBans);
+        sheet.getRange(row + 1, activeBansColIndex + 1).setValue(activeBansCount);
+        sheet.getRange(row + 1, expiredBansColIndex + 1).setValue(expiredBansCount);
+        sheet.getRange(row + 1, reputationColIndex + 1).setValue(user.reputationPoints);
+        sheet.getRange(row + 1, riskRatingColIndex + 1).setValue(user.riskRating);
+      } else {
+        // No data found - leave cells blank instead of N/A
+        sheet.getRange(row + 1, hasBansColIndex + 1).setValue("");
+        sheet.getRange(row + 1, activeBansColIndex + 1).setValue("");
+        sheet.getRange(row + 1, expiredBansColIndex + 1).setValue("");
+        sheet.getRange(row + 1, reputationColIndex + 1).setValue("");
+        sheet.getRange(row + 1, riskRatingColIndex + 1).setValue("");
+      }
+      
+      // Update progress tracker
+      properties.setProperty('lastCBLProcessedRow', row.toString());
+      
+      // Add a small delay to avoid hitting API rate limits
+      Utilities.sleep(500);
+    } catch (error) {
+      // Log the error and continue with the next row
+      console.error(`Error processing row ${row + 1}: ${error.message}`);
+      
+      // Still add Steam profile and CBL profile links even if there's an error
+      const steamProfileUrl = `https://steamcommunity.com/profiles/${steamId}`;
+      sheet.getRange(row + 1, steamProfileLinkColIndex + 1).setValue(steamProfileUrl);
+      
+      const cblProfileUrl = `https://communitybanlist.com/search/${steamId}`;
+      sheet.getRange(row + 1, cblProfileLinkColIndex + 1).setValue(cblProfileUrl);
+      
+      // Mark as error in the sheet
+      sheet.getRange(row + 1, hasBansColIndex + 1).setValue("ERROR");
+      sheet.getRange(row + 1, activeBansColIndex + 1).setValue("ERROR");
+      sheet.getRange(row + 1, expiredBansColIndex + 1).setValue("ERROR");
+      sheet.getRange(row + 1, reputationColIndex + 1).setValue("ERROR");
+      sheet.getRange(row + 1, riskRatingColIndex + 1).setValue("ERROR");
+      
+      // Update progress tracker
+      properties.setProperty('lastCBLProcessedRow', row.toString());
+      
+      // Add a small delay to avoid hitting API rate limits
+      Utilities.sleep(500);
+    }
+    
+    // Check if we've reached the time limit (5 minutes)
+    if (row > startRow && (row - startRow) % 10 === 0) {
+      const timeElapsed = (new Date().getTime() - new Date().getTime()) / 1000;
+      if (timeElapsed > 270) { // 4.5 minutes (leaving 30 seconds buffer)
+        const message = `Time limit approaching. Processed ${row - startRow + 1} rows. ` +
+                        `Use "Resume CBL Status Check" to continue from row ${row + 1}.`;
+        SpreadsheetApp.getUi().alert(message);
+        return;
+      }
+    }
+  }
+  
+  // All done!
+  SpreadsheetApp.getUi().alert('CBL status check completed!');
+  
+  // Reset progress tracker
+  properties.deleteProperty('lastCBLProcessedRow');
+  properties.deleteProperty('currentCBLSheetId');
 } 
