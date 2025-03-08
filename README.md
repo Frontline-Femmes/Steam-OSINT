@@ -2,8 +2,6 @@
 
 A comprehensive Open Source Intelligence (OSINT) tool for Steam users and games, integrated directly into Google Sheets.
 
-Built with @getcursor
-
 ## What is Steam OSINT?
 
 Steam OSINT is a Google Apps Script that provides powerful tools for gathering and analyzing information about Steam users and games. It leverages the Steam Web API and Community Ban List (CBL) API to collect data that can be used for research, community management, game analytics, and more.
@@ -18,6 +16,7 @@ Steam OSINT is a Google Apps Script that provides powerful tools for gathering a
 - **Batch Processing**: Process multiple Steam IDs in a single operation
 - **CBL Integration**: Check Community Ban List status for Steam users
 - **Profile Links**: Automatically generate links to Steam and CBL profiles
+- **Username Conversion**: Convert Steam usernames to SteamID64 format
 
 ## Features
 
@@ -116,7 +115,7 @@ The script adds a comprehensive "Steam OSINT" menu with the following options:
 - **Reset CBL Progress Tracker**: Clears saved CBL progress to start fresh
 
 #### Utilities
-- **Convert SteamID Format**: Provides information about SteamID conversion
+- **Convert SteamID Format**: Convert Steam usernames to SteamID64 format (single or batch)
 - **Validate Steam API Key**: Checks if your Steam API key is working correctly
 - **About/Help**: Shows information about the script and its features
 
@@ -215,4 +214,27 @@ For checking individual users, use "User Info" > "Check CBL Status" which will d
 
 ## Steam ID Format
 
-This script expects Steam IDs in the 64-bit format (also called SteamID64 or Community ID). These are 17-digit numbers like `76561198000000000`. If your IDs are in a different format, you'll need to convert them first. 
+This script expects Steam IDs in the 64-bit format (also called SteamID64 or Community ID). These are 17-digit numbers like `76561198000000000`. If your IDs are in a different format, you'll need to convert them first.
+
+### Username to SteamID64 Conversion
+
+The script includes a built-in feature to convert Steam usernames to SteamID64 format:
+
+1. Select "Utilities" > "Convert SteamID Format" from the Steam OSINT menu
+2. Choose one of the following options:
+   - **Option 1**: Convert a single username to SteamID64
+   - **Option 2**: Convert usernames in a column to SteamID64
+
+#### Single Username Conversion
+For converting a single username:
+1. Enter the Steam username (vanity URL name)
+2. The script will display the corresponding SteamID64 if found
+
+#### Batch Username Conversion
+For converting multiple usernames:
+1. Ensure your sheet has a column containing Steam usernames
+2. Specify which column contains the usernames
+3. Specify which column should store the resulting SteamID64s
+4. The script will process all usernames and populate the result column
+
+**Note**: This conversion uses the Steam API's ResolveVanityURL endpoint, which works with custom profile URLs. For example, if a user's profile is at `https://steamcommunity.com/id/username`, you would enter `username`. 
