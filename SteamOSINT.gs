@@ -614,17 +614,183 @@ function getPrivacyStatus(visibilityState) {
 }
 
 /**
- * Utility to convert between different SteamID formats
+ * Utility to convert between different SteamID formats or resolve usernames to SteamID64
  */
 function convertSteamIDFormat() {
   const ui = SpreadsheetApp.getUi();
+  
+  // Create a dialog with options
   const response = ui.prompt(
-    'Convert SteamID Format',
-    'This feature helps convert between different SteamID formats.\n' +
-    'Currently, this is a placeholder for future functionality.\n\n' +
-    'For now, you can use online converters like:\n' +
-    '- https://steamid.io\n' +
-    '- https://steamidfinder.com',
+    'Convert Steam ID Format',
+    'Choose an option:\n\n' +
+    '1. Convert a username to SteamID64\n' +
+    '2. Convert usernames in a column to SteamID64\n\n' +
+    'Enter the number of your choice (1 or 2):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() === ui.Button.OK) {
+    const choice = response.getResponseText().trim();
+    
+    if (choice === '1') {
+      // Single username conversion
+      convertSingleUsername();
+    } else if (choice === '2') {
+      // Batch username conversion
+      convertUsernameColumn();
+    } else {
+      ui.alert('Invalid choice. Please enter 1 or 2.');
+    }
+  }
+}
+
+/**
+ * Converts a single username to SteamID64
+ */
+function convertSingleUsername() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const response = ui.prompt(
+    'Convert Username to SteamID64',
+    'Enter the Steam username:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() === ui.Button.OK) {
+    const username = response.getResponseText().trim();
+    
+    if (!username) {
+      ui.alert('Error', 'Please enter a valid username.', ui.ButtonSet.OK);
+      return;
+    }
+    
+    try {
+      // Use Steam API to resolve vanity URL to SteamID64
+      const url = `http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${STEAM_API_KEY}&vanityurl=${encodeURIComponent(username)}`;
+      const response = UrlFetchApp.fetch(url);
+      const data = JSON.parse(response.getContentText());
+      
+      if (data.response && data.response.success === 1) {
+        const steamId64 = data.response.steamid;
+        
+        // Show the result
+        ui.alert(
+          'Conversion Result',
+          `Username: ${username}\nSteamID64: ${steamId64}\n\nYou can now use this SteamID64 in your sheet.`,
+          ui.ButtonSet.OK
+        );
+      } else {
+        // Handle error
+        let errorMessage = 'Could not resolve username to SteamID64.';
+        if (data.response && data.response.message) {
+          errorMessage += ` Error: ${data.response.message}`;
+        }
+        ui.alert('Error', errorMessage, ui.ButtonSet.OK);
+      }
+    } catch (error) {
+      ui.alert('Error', `Failed to convert username: ${error.message}`, ui.ButtonSet.OK);
+    }
+  }
+}
+
+/**
+ * Converts usernames in a column to SteamID64
+ */
+function convertUsernameColumn() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+  
+  // Ask which column contains usernames
+  const usernameColResponse = ui.prompt(
+    'Username Column',
+    'Enter the column letter that contains Steam usernames:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (usernameColResponse.getSelectedButton() !== ui.Button.OK) {
+    return; // User cancelled
+  }
+  
+  const usernameColLetter = usernameColResponse.getResponseText().toUpperCase();
+  const usernameColIndex = columnLetterToIndex(usernameColLetter);
+  
+  // Ask where to put the SteamID64 results
+  const resultColResponse = ui.prompt(
+    'Result Column',
+    'Enter the column letter where you want to store the SteamID64 results:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (resultColResponse.getSelectedButton() !== ui.Button.OK) {
+    return; // User cancelled
+  }
+  
+  const resultColLetter = resultColResponse.getResponseText().toUpperCase();
+  const resultColIndex = columnLetterToIndex(resultColLetter);
+  
+  // Confirm header
+  sheet.getRange(1, resultColIndex + 1).setValue('SteamID64');
+  
+  // Ask for confirmation before proceeding
+  const confirmResponse = ui.alert(
+    'Confirm Conversion',
+    `This will convert usernames in column ${usernameColLetter} to SteamID64 format in column ${resultColLetter}.\n\n` +
+    'This process may take some time depending on the number of usernames. Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirmResponse !== ui.Button.YES) {
+    return; // User cancelled
+  }
+  
+  // Process each row (skip header)
+  let successCount = 0;
+  let errorCount = 0;
+  
+  for (let row = 1; row < values.length; row++) {
+    const username = values[row][usernameColIndex].toString().trim();
+    
+    // Skip empty cells
+    if (!username) {
+      continue;
+    }
+    
+    try {
+      // Use Steam API to resolve vanity URL to SteamID64
+      const url = `http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${STEAM_API_KEY}&vanityurl=${encodeURIComponent(username)}`;
+      const response = UrlFetchApp.fetch(url);
+      const data = JSON.parse(response.getContentText());
+      
+      if (data.response && data.response.success === 1) {
+        const steamId64 = data.response.steamid;
+        
+        // Update the result cell
+        sheet.getRange(row + 1, resultColIndex + 1).setValue(steamId64);
+        successCount++;
+      } else {
+        // Handle error
+        sheet.getRange(row + 1, resultColIndex + 1).setValue('Error: Not found');
+        errorCount++;
+      }
+    } catch (error) {
+      // Handle error
+      sheet.getRange(row + 1, resultColIndex + 1).setValue(`Error: ${error.message}`);
+      errorCount++;
+    }
+    
+    // Add a small delay to avoid hitting API rate limits
+    Utilities.sleep(200);
+  }
+  
+  // Show completion message
+  ui.alert(
+    'Conversion Complete',
+    `Processed ${successCount + errorCount} usernames:\n` +
+    `- ${successCount} successful conversions\n` +
+    `- ${errorCount} errors\n\n` +
+    'Check column ' + resultColLetter + ' for results.',
     ui.ButtonSet.OK
   );
 }
@@ -658,7 +824,7 @@ function showAboutDialog() {
   const ui = SpreadsheetApp.getUi();
   const message = 
     'Steam OSINT\n' +
-    'Version 2.1.0\n\n' +
+    'Version 2.2.0\n\n' +
     'This script provides Open Source Intelligence (OSINT) tools for Steam users and games.\n\n' +
     'Features:\n' +
     '- Check game ownership for multiple Steam IDs\n' +
@@ -668,6 +834,7 @@ function showAboutDialog() {
     '- Get detailed game information\n' +
     '- Find game AppIDs\n' +
     '- Check Community Ban List (CBL) status\n' +
+    '- Convert Steam usernames to SteamID64\n' +
     '- Resume interrupted operations\n\n' +
     'For help or to report issues, please refer to the README documentation.\n\n' +
     'This script uses the Steam Web API and requires a valid API key.\n' +
