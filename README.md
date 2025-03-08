@@ -2,7 +2,7 @@
 
 A comprehensive Open Source Intelligence (OSINT) tool for Steam users and games, integrated directly into Google Sheets.
 
-Built with the assistance of Claude-7.5/Cursor.
+Built with the assistance of Claude-3.7/Cursor.
 
 ## What is Steam OSINT?
 
